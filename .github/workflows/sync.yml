@@ -28,9 +28,9 @@ jobs:
           upstream_sync_repo: senshinya/MoonTV
           upstream_sync_branch: main
           target_sync_branch: main
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }} # 这个用于操作您自己的仓库
-          # 新增下面这行，提供用于读取上游仓库的令牌
-          upstream_sync_token: ${{ secrets.UPSTREAM_TOKEN }} 
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          # 修改这一行：使用正确的参数名
+          upstream_repo_access_token: ${{ secrets.UPSTREAM_TOKEN }}
 
       - name: Sync check
         if: failure()
