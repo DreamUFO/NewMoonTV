@@ -11,7 +11,7 @@ export interface PlayRecord {
   play_time: number; // 播放进度（秒）
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
-  search_title?: string; // 搜索时使用的标题
+  search_title: string; // 搜索时使用的标题
 }
 
 // 收藏数据结构
@@ -22,7 +22,7 @@ export interface Favorite {
   year: string;
   cover: string;
   save_time: number; // 记录保存时间（时间戳）
-  search_title?: string; // 搜索时使用的标题
+  search_title: string; // 搜索时使用的标题
 }
 
 // 存储接口
@@ -64,6 +64,21 @@ export interface IStorage {
   // 管理员配置相关
   getAdminConfig(): Promise<AdminConfig | null>;
   setAdminConfig(config: AdminConfig): Promise<void>;
+
+  // 跳过片头片尾配置相关
+  getSkipConfig(
+    userName: string,
+    source: string,
+    id: string
+  ): Promise<SkipConfig | null>;
+  setSkipConfig(
+    userName: string,
+    source: string,
+    id: string,
+    config: SkipConfig
+  ): Promise<void>;
+  deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
+  getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
 }
 
 // 搜索结果数据结构
@@ -87,10 +102,18 @@ export interface DoubanItem {
   title: string;
   poster: string;
   rate: string;
+  year: string;
 }
 
 export interface DoubanResult {
   code: number;
   message: string;
   list: DoubanItem[];
+}
+
+// 跳过片头片尾配置数据结构
+export interface SkipConfig {
+  enable: boolean; // 是否启用跳过片头片尾
+  intro_time: number; // 片头时间（秒）
+  outro_time: number; // 片尾时间（秒）
 }

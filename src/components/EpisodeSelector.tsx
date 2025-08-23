@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 
 import { SearchResult } from '@/lib/types';
-import { getVideoResolutionFromM3u8 } from '@/lib/utils';
+import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
 // 定义视频信息类型
 interface VideoInfo {
@@ -96,6 +96,14 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   // 是否倒序显示
   const [descending, setDescending] = useState<boolean>(false);
 
+  // 根据 descending 状态计算实际显示的分页索引
+  const displayPage = useMemo(() => {
+    if (descending) {
+      return pageCount - 1 - currentPage;
+    }
+    return currentPage;
+  }, [currentPage, descending, pageCount]);
+
   // 获取视频信息的函数 - 移除 attemptedSources 依赖避免不必要的重新创建
   const getVideoInfo = useCallback(async (source: SearchResult) => {
     const sourceKey = `${source.source}-${source.id}`;
@@ -162,10 +170,30 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     }
   }, [precomputedVideoInfo]);
 
+  // 读取本地“优选和测速”开关，默认开启
+  const [optimizationEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('enableOptimization');
+      if (saved !== null) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return true;
+  });
+
   // 当切换到换源tab并且有源数据时，异步获取视频信息 - 移除 attemptedSources 依赖避免循环触发
   useEffect(() => {
     const fetchVideoInfosInBatches = async () => {
-      if (activeTab !== 'sources' || availableSources.length === 0) return;
+      if (
+        !optimizationEnabled || // 若关闭测速则直接退出
+        activeTab !== 'sources' ||
+        availableSources.length === 0
+      )
+        return;
 
       // 筛选出尚未测速的播放源
       const pendingSources = availableSources.filter((source) => {
@@ -185,26 +213,34 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
     fetchVideoInfosInBatches();
     // 依赖项保持与之前一致
-  }, [activeTab, availableSources, getVideoInfo]);
+  }, [activeTab, availableSources, getVideoInfo, optimizationEnabled]);
 
   // 升序分页标签
   const categoriesAsc = useMemo(() => {
     return Array.from({ length: pageCount }, (_, i) => {
       const start = i * episodesPerPage + 1;
       const end = Math.min(start + episodesPerPage - 1, totalEpisodes);
-      return `${start}-${end}`;
+      return { start, end };
     });
   }, [pageCount, episodesPerPage, totalEpisodes]);
 
-  // 分页标签始终保持升序
-  const categories = categoriesAsc;
+  // 根据 descending 状态决定分页标签的排序和内容
+  const categories = useMemo(() => {
+    if (descending) {
+      // 倒序时，label 也倒序显示
+      return [...categoriesAsc]
+        .reverse()
+        .map(({ start, end }) => `${end}-${start}`);
+    }
+    return categoriesAsc.map(({ start, end }) => `${start}-${end}`);
+  }, [categoriesAsc, descending]);
 
   const categoryContainerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   // 当分页切换时，将激活的分页标签滚动到视口中间
   useEffect(() => {
-    const btn = buttonRefs.current[currentPage];
+    const btn = buttonRefs.current[displayPage];
     const container = categoryContainerRef.current;
     if (btn && container) {
       // 手动计算滚动位置，只滚动分页标签容器
@@ -226,16 +262,24 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         behavior: 'smooth',
       });
     }
-  }, [currentPage, pageCount]);
+  }, [displayPage, pageCount]);
 
   // 处理换源tab点击，只在点击时才搜索
   const handleSourceTabClick = () => {
     setActiveTab('sources');
   };
 
-  const handleCategoryClick = useCallback((index: number) => {
-    setCurrentPage(index);
-  }, []);
+  const handleCategoryClick = useCallback(
+    (index: number) => {
+      if (descending) {
+        // 在倒序时，需要将显示索引转换为实际索引
+        setCurrentPage(pageCount - 1 - index);
+      } else {
+        setCurrentPage(index);
+      }
+    },
+    [descending, pageCount]
+  );
 
   const handleEpisodeClick = useCallback(
     (episodeNumber: number) => {
@@ -297,7 +341,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             <div className='flex-1 overflow-x-auto' ref={categoryContainerRef}>
               <div className='flex gap-2 min-w-max'>
                 {categories.map((label, idx) => {
-                  const isActive = idx === currentPage;
+                  const isActive = idx === displayPage;
                   return (
                     <button
                       key={label}
@@ -437,18 +481,18 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                         onClick={() =>
                           !isCurrentSource && handleSourceClick(source)
                         }
-                        className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200 relative
+                        className={`flex items-start gap-3 px-2 py-3 rounded-lg transition-all select-none duration-200 relative
                       ${
                         isCurrentSource
                           ? 'bg-green-500/10 dark:bg-green-500/20 border-green-500/30 border'
-                          : 'hover:bg-gray-200/50 dark:hover:bg-white/10 hover:scale-[1.02]'
+                          : 'hover:bg-gray-200/50 dark:hover:bg-white/10 hover:scale-[1.02] cursor-pointer'
                       }`.trim()}
                       >
                         {/* 封面 */}
                         <div className='flex-shrink-0 w-12 h-20 bg-gray-300 dark:bg-gray-600 rounded overflow-hidden'>
                           {source.episodes && source.episodes.length > 0 && (
                             <img
-                              src={source.poster}
+                              src={processImageUrl(source.poster)}
                               alt={source.title}
                               className='w-full h-full object-cover'
                               onError={(e) => {
@@ -462,14 +506,14 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                         {/* 信息区域 */}
                         <div className='flex-1 min-w-0 flex flex-col justify-between h-20'>
                           {/* 标题和分辨率 - 顶部 */}
-                          <div className='flex items-start justify-between gap-2 h-6'>
-                            <div className='flex-1 relative group/title'>
+                          <div className='flex items-start justify-between gap-3 h-6'>
+                            <div className='flex-1 min-w-0 relative group/title'>
                               <h3 className='font-medium text-base truncate text-gray-900 dark:text-gray-100 leading-none'>
                                 {source.title}
                               </h3>
                               {/* 标题级别的 tooltip - 第一个元素不显示 */}
                               {index !== 0 && (
-                                <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible group-hover/title:opacity-100 group-hover/title:visible transition-all duration-200 ease-out delay-100 whitespace-nowrap z-[9999] pointer-events-none'>
+                                <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-md shadow-lg opacity-0 invisible group-hover/title:opacity-100 group-hover/title:visible transition-all duration-200 ease-out delay-100 whitespace-nowrap z-[500] pointer-events-none'>
                                   {source.title}
                                   <div className='absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-800'></div>
                                 </div>
@@ -482,7 +526,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                               if (videoInfo && videoInfo.quality !== '未知') {
                                 if (videoInfo.hasError) {
                                   return (
-                                    <div className='bg-gray-500/10 dark:bg-gray-400/20 text-red-600 dark:text-red-400 px-1.5 py-0 rounded text-xs flex-shrink-0'>
+                                    <div className='bg-gray-500/10 dark:bg-gray-400/20 text-red-600 dark:text-red-400 px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center'>
                                       检测失败
                                     </div>
                                   );
@@ -502,7 +546,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
                                   return (
                                     <div
-                                      className={`bg-gray-500/10 dark:bg-gray-400/20 ${textColorClasses} px-1.5 py-0 rounded text-xs flex-shrink-0`}
+                                      className={`bg-gray-500/10 dark:bg-gray-400/20 ${textColorClasses} px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center`}
                                     >
                                       {videoInfo.quality}
                                     </div>

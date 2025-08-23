@@ -1,11 +1,7 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
-import { getRequestContext } from '@cloudflare/next-on-pages';
-
 import { AdminConfig } from './admin.types';
-import { Favorite, IStorage, PlayRecord } from './types';
-
-export const runtime = 'edge';
+import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 
 // 搜索历史最大条数
 const SEARCH_HISTORY_LIMIT = 20;
@@ -41,134 +37,19 @@ interface D1ExecResult {
   duration: number;
 }
 
-// 数据库初始化 SQL
-const INIT_SQL = `
-  CREATE TABLE IF NOT EXISTS users (
-    username TEXT PRIMARY KEY,
-    password TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS play_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    key TEXT NOT NULL,
-    title TEXT NOT NULL,
-    source_name TEXT NOT NULL,
-    cover TEXT NOT NULL,
-    year TEXT NOT NULL,
-    index_episode INTEGER NOT NULL,
-    total_episodes INTEGER NOT NULL,
-    play_time INTEGER NOT NULL,
-    total_time INTEGER NOT NULL,
-    save_time INTEGER NOT NULL,
-    search_title TEXT,
-    UNIQUE(username, key)
-  );
-
-  CREATE TABLE IF NOT EXISTS favorites (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    key TEXT NOT NULL,
-    title TEXT NOT NULL,
-    source_name TEXT NOT NULL,
-    cover TEXT NOT NULL,
-    year TEXT NOT NULL,
-    total_episodes INTEGER NOT NULL,
-    save_time INTEGER NOT NULL,
-    UNIQUE(username, key)
-  );
-
-  CREATE TABLE IF NOT EXISTS search_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    keyword TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    UNIQUE(username, keyword)
-  );
-
-  CREATE TABLE IF NOT EXISTS admin_config (
-    id INTEGER PRIMARY KEY DEFAULT 1,
-    config TEXT NOT NULL,
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-  );
-
-  -- 基本索引
-  CREATE INDEX IF NOT EXISTS idx_play_records_username ON play_records(username);
-  CREATE INDEX IF NOT EXISTS idx_favorites_username ON favorites(username);
-  CREATE INDEX IF NOT EXISTS idx_search_history_username ON search_history(username);
-  
-  -- 复合索引优化查询性能
-  -- 播放记录：用户名+键值的复合索引，用于快速查找特定记录
-  CREATE INDEX IF NOT EXISTS idx_play_records_username_key ON play_records(username, key);
-  -- 播放记录：用户名+保存时间的复合索引，用于按时间排序的查询
-  CREATE INDEX IF NOT EXISTS idx_play_records_username_save_time ON play_records(username, save_time DESC);
-  
-  -- 收藏：用户名+键值的复合索引，用于快速查找特定收藏
-  CREATE INDEX IF NOT EXISTS idx_favorites_username_key ON favorites(username, key);
-  -- 收藏：用户名+保存时间的复合索引，用于按时间排序的查询
-  CREATE INDEX IF NOT EXISTS idx_favorites_username_save_time ON favorites(username, save_time DESC);
-  
-  -- 搜索历史：用户名+关键词的复合索引，用于快速查找/删除特定搜索记录
-  CREATE INDEX IF NOT EXISTS idx_search_history_username_keyword ON search_history(username, keyword);
-  -- 搜索历史：用户名+创建时间的复合索引，用于按时间排序的查询
-  CREATE INDEX IF NOT EXISTS idx_search_history_username_created_at ON search_history(username, created_at DESC);
-  
-  -- 搜索历史清理查询的优化索引
-  CREATE INDEX IF NOT EXISTS idx_search_history_username_id_created_at ON search_history(username, id, created_at DESC);
-`;
-
 // 获取全局D1数据库实例
 function getD1Database(): D1Database {
-  try {
-    // 在 Cloudflare Pages 环境中，通过 getRequestContext 访问 D1 数据库
-    const { env } = getRequestContext();
-    if (env && (env as any).DB) {
-      return (env as any).DB as D1Database;
-    }
-  } catch (error) {
-    // 如果 getRequestContext 失败，继续尝试其他方式
-    console.warn('Failed to get request context:', error);
-  }
-
-  // 在 next-on-pages 环境中，D1 数据库可能通过 process.env 暴露
-  if (typeof process !== 'undefined' && (process.env as any).DB) {
-    return (process.env as any).DB as D1Database;
-  }
-
-  throw new Error(
-    'D1 database not available. Make sure DB is bound in your Cloudflare Pages project settings'
-  );
+  return (process.env as any).DB as D1Database;
 }
 
 export class D1Storage implements IStorage {
   private db: D1Database | null = null;
-  private initialized = false;
-
-  constructor() {
-    // 不在构造函数中初始化数据库，延迟到实际使用时
-  }
 
   private async getDatabase(): Promise<D1Database> {
     if (!this.db) {
       this.db = getD1Database();
-      if (!this.initialized) {
-        await this.initDatabase();
-        this.initialized = true;
-      }
     }
     return this.db;
-  }
-
-  private async initDatabase() {
-    try {
-      if (this.db) {
-        await this.db.exec(INIT_SQL);
-      }
-    } catch (err) {
-      console.error('Failed to initialize D1 database:', err);
-      throw err;
-    }
   }
 
   // 播放记录相关
@@ -306,6 +187,7 @@ export class D1Storage implements IStorage {
         year: result.year,
         total_episodes: result.total_episodes,
         save_time: result.save_time,
+        search_title: result.search_title,
       };
     } catch (err) {
       console.error('Failed to get favorite:', err);
@@ -365,6 +247,7 @@ export class D1Storage implements IStorage {
           year: row.year,
           total_episodes: row.total_episodes,
           save_time: row.save_time,
+          search_title: row.search_title,
         };
       });
 
@@ -456,6 +339,9 @@ export class D1Storage implements IStorage {
         db.prepare('DELETE FROM favorites WHERE username = ?').bind(userName),
         db
           .prepare('DELETE FROM search_history WHERE username = ?')
+          .bind(userName),
+        db
+          .prepare('DELETE FROM skip_configs WHERE username = ?')
           .bind(userName),
       ];
 
@@ -587,6 +473,114 @@ export class D1Storage implements IStorage {
         .run();
     } catch (err) {
       console.error('Failed to set admin config:', err);
+      throw err;
+    }
+  }
+
+  // ---------- 跳过片头片尾配置 ----------
+  async getSkipConfig(
+    userName: string,
+    source: string,
+    id: string
+  ): Promise<SkipConfig | null> {
+    try {
+      const db = await this.getDatabase();
+      const result = await db
+        .prepare(
+          'SELECT * FROM skip_configs WHERE username = ? AND source = ? AND id_video = ?'
+        )
+        .bind(userName, source, id)
+        .first<any>();
+
+      if (!result) return null;
+
+      return {
+        enable: Boolean(result.enable),
+        intro_time: result.intro_time,
+        outro_time: result.outro_time,
+      };
+    } catch (err) {
+      console.error('Failed to get skip config:', err);
+      throw err;
+    }
+  }
+
+  async setSkipConfig(
+    userName: string,
+    source: string,
+    id: string,
+    config: SkipConfig
+  ): Promise<void> {
+    try {
+      const db = await this.getDatabase();
+      await db
+        .prepare(
+          `
+          INSERT OR REPLACE INTO skip_configs 
+          (username, source, id_video, enable, intro_time, outro_time)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `
+        )
+        .bind(
+          userName,
+          source,
+          id,
+          config.enable ? 1 : 0,
+          config.intro_time,
+          config.outro_time
+        )
+        .run();
+    } catch (err) {
+      console.error('Failed to set skip config:', err);
+      throw err;
+    }
+  }
+
+  async deleteSkipConfig(
+    userName: string,
+    source: string,
+    id: string
+  ): Promise<void> {
+    try {
+      const db = await this.getDatabase();
+      await db
+        .prepare(
+          'DELETE FROM skip_configs WHERE username = ? AND source = ? AND id_video = ?'
+        )
+        .bind(userName, source, id)
+        .run();
+    } catch (err) {
+      console.error('Failed to delete skip config:', err);
+      throw err;
+    }
+  }
+
+  async getAllSkipConfigs(
+    userName: string
+  ): Promise<{ [key: string]: SkipConfig }> {
+    try {
+      const db = await this.getDatabase();
+      const result = await db
+        .prepare(
+          'SELECT source, id_video, enable, intro_time, outro_time FROM skip_configs WHERE username = ?'
+        )
+        .bind(userName)
+        .all<any>();
+
+      const configs: { [key: string]: SkipConfig } = {};
+
+      result.results.forEach((row) => {
+        const key = `${row.source}+${row.id_video}`;
+        configs[key] = {
+          enable: Boolean(row.enable),
+          intro_time: row.intro_time,
+          outro_time: row.outro_time,
+        };
+      });
+
+      return configs;
+    } catch (err) {
+      console.error('Failed to get all skip configs:', err);
       throw err;
     }
   }
