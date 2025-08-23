@@ -2,7 +2,7 @@ name: Upstream Sync
 
 on:
   schedule:
-    - cron: "0 */6 * * *" # run every 6 hours
+    - cron: "0 */6 * * *" # 每6小时运行一次（将基于北京时间）
   workflow_dispatch:
 
 permissions:
@@ -14,13 +14,20 @@ jobs:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
     if: ${{ github.event.repository.fork }}
+    # 添加时区配置 - 设置为北京时间
+    env:
+      TZ: Asia/Shanghai
 
     steps:
-      # Step 1: run a standard checkout action
       - name: Checkout target repo
         uses: actions/checkout@v4
 
-      # Step 2: run the sync action
+      # 添加时区验证步骤
+      - name: Check timezone
+        run: |
+          echo "Current time: $(date)"
+          echo "Timezone: $(cat /etc/timezone)"
+
       - name: Sync upstream changes
         id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
@@ -29,7 +36,6 @@ jobs:
           upstream_sync_branch: main
           target_sync_branch: main
           target_repo_token: ${{ secrets.GITHUB_TOKEN }}
-          # 修改这一行：使用正确的参数名.
           upstream_repo_access_token: ${{ secrets.UPSTREAM_TOKEN }}
 
       - name: Sync check
