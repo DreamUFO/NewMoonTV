@@ -1,8 +1,6 @@
 name: Upstream Sync
 
 on:
-  schedule:
-    - cron: "0 */6 * * *" # 每6小时运行一次（将基于北京时间）
   workflow_dispatch:
 
 permissions:
@@ -14,7 +12,7 @@ jobs:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
     if: ${{ github.event.repository.fork }}
-    # 添加时区配置 - 设置为北京时间
+    # 添加时区配置 - 设置为北京时间. (虽然不再定时运行，但保留也无妨)
     env:
       TZ: Asia/Shanghai
 
@@ -22,7 +20,7 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v4
 
-      # 添加时区验证步骤
+      # 添加时区验证步骤 (虽然不再定时运行，但保留也无妨)
       - name: Check timezone
         run: |
           echo "Current time: $(date)"
