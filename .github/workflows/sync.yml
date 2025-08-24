@@ -3,7 +3,7 @@ name: Upstream Sync
 on:
   schedule:
     - cron: '0 * * * *' # 每小时运行一次
-  workflow_dispatch:
+  workflow_dispatch:  # 允许手动触发
 
 permissions:
   contents: write
@@ -16,31 +16,68 @@ jobs:
     if: ${{ github.event.repository.fork }}
     env:
       TZ: Asia/Shanghai
+      UPSTREAM_REPO: senshinya/MoonTV
+      UPSTREAM_BRANCH: main
+      TARGET_BRANCH: main
 
     steps:
+      - name: Check environment information
+        run: |
+          echo "GitHub Repository: ${{ github.repository }}"
+          echo "Upstream Repository: $UPSTREAM_REPO"
+          echo "Upstream Branch: $UPSTREAM_BRANCH"
+          echo "Target Branch: $TARGET_BRANCH"
+          echo "Current Time: $(date)"
+
       - name: Checkout target repo
         uses: actions/checkout@v4
-
-      - name: Sync upstream changes
-        id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
-          upstream_sync_repo: senshinya/MoonTV
-          upstream_sync_branch: main
-          target_sync_branch: main
-          target_repo_token: ${{ secrets.PATTOKEN }} # 使用个人访问令牌替代GITHUB_TOKEN
+          fetch-depth: 0  # 获取完整历史，避免浅克隆导致的问题
+          ref: ${{ env.TARGET_BRANCH }}
 
-      - name: Sync check
+      - name: Network connectivity test
+        run: |
+          echo "Testing connection to GitHub..."
+          ping github.com -c 4
+          echo "Checking upstream repository accessibility..."
+          curl -sSL "https://github.com/$UPSTREAM_REPO" | head -n 5
+
+      - name: Sync upstream changes with retry
+        id: sync
+        uses: softprops/action-retry@v1
+        with:
+          max_attempts: 3  # 最多重试3次
+          interval_seconds: 60  # 重试间隔60秒
+          command: |
+            # 使用 Fork-Sync 工具执行同步
+            npx fork-sync-with-upstream-action \
+              --upstream-repo "$UPSTREAM_REPO" \
+              --upstream-branch "$UPSTREAM_BRANCH" \
+              --target-branch "$TARGET_BRANCH" \
+              --token "${{ secrets.PATTOKEN }}" \
+              --git-pull-args "--rebase" \
+              --git-push-args "--force-with-lease" \
+              --verbose
+
+      - name: Display sync result
+        run: |
+          echo "Sync status: ${{ steps.sync.outputs.status }}"
+          echo "Sync output: ${{ steps.sync.outputs.stdout }}"
+          
+      - name: Handle sync failure
         if: failure()
         run: |
-          echo "[Error] Failed to sync with upstream. Possible reasons: permission issues, network problems, branch conflicts, or upstream changes. Please check logs for details."
+          echo "[ERROR] Sync failed after 3 attempts"
           exit 1
 
-      - name: Delete workflow runs
-        uses: Mattraks/delete-workflow-runs@v2 # 使用固定版本
+      - name: Delete old workflow runs
+        if: success()  # 只有同步成功才清理
+        uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ secrets.PATTOKEN }}
           repository: ${{ github.repository }}
-          retain_days: 0
-          keep_minimum_runs: 2
+          retain_days: 1  # 保留1天的运行记录
+          keep_minimum_runs: 2  # 至少保留2条记录
+
+
 
