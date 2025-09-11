@@ -12,13 +12,13 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-
+  // 如果没有设置密码，直接允许访问所有页面
   if (!process.env.PASSWORD) {
-    // 如果没有设置密码，重定向到警告页面
-    const warningUrl = new URL('/warning', request.url);
-    return NextResponse.redirect(warningUrl);
+    return NextResponse.next();
   }
+
+  // 以下代码只有在设置了密码的情况下才会执行
+  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
 
   // 从cookie获取认证信息
   const authInfo = getAuthInfoFromCookie(request);
@@ -26,6 +26,8 @@ export async function middleware(request: NextRequest) {
   if (!authInfo) {
     return handleAuthFailure(request, pathname);
   }
+
+  // ... 其余认证逻辑保持不变
 
   // localstorage模式：在middleware中完成验证
   if (storageType === 'localstorage') {
