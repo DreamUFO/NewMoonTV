@@ -34,16 +34,28 @@ function DoubanPageClient() {
     Array<{ name: string; type: 'movie' | 'tv'; query: string }>
   >([]);
 
-  // 选择器状态 - 完全独立，不依赖URL参数
   const [primarySelection, setPrimarySelection] = useState<string>(() => {
-    return type === 'movie' ? '热门' : '';
-  });
-  const [secondarySelection, setSecondarySelection] = useState<string>(() => {
-    if (type === 'movie') return '全部';
-    if (type === 'tv') return 'tv';
-    if (type === 'show') return 'show';
-    return '全部';
-  });
+  if (type === 'movie') return '热门';
+  return '';
+});
+
+const [secondarySelection, setSecondarySelection] = useState<string>(() => {
+  if (type === 'movie') return '全部';
+  if (type === 'tv') return 'tv';
+  if (type === 'show') return 'show';
+  return '全部';
+});
+  
+  // 选择器状态 - 完全独立，不依赖URL参数
+  //const [primarySelection, setPrimarySelection] = useState<string>(() => {
+  //  return type === 'movie' ? '热门' : '';
+  //});
+  //const [secondarySelection, setSecondarySelection] = useState<string>(() => {
+  //  if (type === 'movie') return '全部';
+  //  if (type === 'tv') return 'tv';
+  //  if (type === 'show') return 'show';
+  //  return '全部';
+  //});
 
   // 获取自定义分类数据
   useEffect(() => {
@@ -108,7 +120,7 @@ function DoubanPageClient() {
       } else {
         setPrimarySelection('');
         setSecondarySelection('全部');
-      }
+      }      
     }
 
     // 使用短暂延迟确保状态更新完成后标记选择器准备好
@@ -125,7 +137,7 @@ function DoubanPageClient() {
   // 生成API请求参数的辅助函数
   const getRequestParams = useCallback(
     (pageStart: number) => {
-      // 当type为tv或show时，kind统一为'tv'，category使用type本身
+      // 当type为tv或show或live时，kind统一为'tv'，category使用type本身
       if (type === 'tv' || type === 'show') {
         return {
           kind: 'tv' as const,
@@ -151,6 +163,7 @@ function DoubanPageClient() {
   // 防抖的数据加载函数
   const loadInitialData = useCallback(async () => {
     try {
+      const params = getRequestParams(0);
       setLoading(true);
       let data: DoubanResult;
 
@@ -172,7 +185,7 @@ function DoubanPageClient() {
           throw new Error('没有找到对应的分类');
         }
       } else {
-        data = await getDoubanCategories(getRequestParams(0));
+          data = await getDoubanCategories(getRequestParams(0));
       }
 
       if (data.code === 200) {
@@ -364,7 +377,7 @@ function DoubanPageClient() {
       ? '综艺'
       : '自定义';
   };
-
+ 
   const getActivePath = () => {
     const params = new URLSearchParams();
     if (type) params.set('type', type);
