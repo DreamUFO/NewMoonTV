@@ -2,8 +2,8 @@ name: Upstream Sync
 
 on:
   schedule:
-    - cron: '0 * * * *' # 每小时运行一次
-  workflow_dispatch:  # 允许手动触发
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,48 +23,64 @@ jobs:
     steps:
       - name: Check environment information
         run: |
-          echo "GitHub Repository: ${{ github.repository }}"
-          echo "Upstream Repository: $UPSTREAM_REPO"
-          echo "Upstream Branch: $UPSTREAM_BRANCH"
-          echo "Target Branch: $TARGET_BRANCH"
-          echo "Current Time: $(date)"
+          echo "Repo: ${{ github.repository }}"
+          echo "Upstream: $UPSTREAM_REPO:$UPSTREAM_BRANCH"
+          echo "Target: $TARGET_BRANCH"
 
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取完整历史，避免浅克隆导致的问题
+          fetch-depth: 0
           ref: ${{ env.TARGET_BRANCH }}
-          token: ${{ secrets.PATTOKEN }}
+          token: ${{ secrets.PATTOKEN }}  # 用PAT确保权限
 
-      - name: Network connectivity test
+      - name: Network test
         run: |
-          echo "Testing connection to GitHub..."
-          ping github.com -c 4
-          echo "Checking upstream repository accessibility..."
-          curl -sSL "https://github.com/$UPSTREAM_REPO" | head -n 5
+          ping github.com -c 2
+          curl -sSL "https://github.com/$UPSTREAM_REPO" | head -n 3
 
       - name: Add upstream remote
         run: |
-          git remote add upstream https://github.com/$UPSTREAM_REPO.git
-          git fetch upstream
+          git remote add upstream https://github.com/$UPSTREAM_REPO.git || true  # 避免重复添加报错
+          git fetch upstream  # 获取上游最新代码
 
-      - name: Merge upstream changes
+      - name: Configure git user
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Merge upstream changes with retry
         run: |
           git checkout $TARGET_BRANCH
-          git merge upstream/$UPSTREAM_BRANCH --no-edit || git merge upstream/$UPSTREAM_BRANCH --no-edit --strategy=ours
-          git push origin $TARGET_BRANCH
-        env:
-          GITHUB_TOKEN: ${{ secrets.PATTOKEN }}
+          git pull origin $TARGET_BRANCH --rebase  # 同步本地与远程目标分支
+          
+          max_attempts=3
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            echo "Attempt $attempt/$max_attempts to merge upstream..."
+            if git merge upstream/$UPSTREAM_BRANCH --no-edit; then
+              git push origin $TARGET_BRANCH
+              echo "Sync successful"
+              exit 0
+            else
+              echo "Merge failed. Checking conflicts..."
+              git status
+              git merge --abort  # 中止当前合并，避免影响下次尝试
+              attempt=$((attempt + 1))
+              [ $attempt -le $max_attempts ] && sleep 30
+            fi
+          done
+          echo "Sync failed after $max_attempts attempts"
+          exit 1
 
       - name: Delete old workflow runs
-        if: success()  # 只有同步成功才清理
+        if: success()
         uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ secrets.PATTOKEN }}
           repository: ${{ github.repository }}
-          retain_days: 1  # 保留1天的运行记录
-          keep_minimum_runs: 2  # 至少保留2条记录
-
+          retain_days: 1
+          keep_minimum_runs: 2
 
 
 
