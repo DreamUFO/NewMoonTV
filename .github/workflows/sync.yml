@@ -34,6 +34,7 @@ jobs:
         with:
           fetch-depth: 0  # 获取完整历史，避免浅克隆导致的问题
           ref: ${{ env.TARGET_BRANCH }}
+          token: ${{ secrets.PATTOKEN }}
 
       - name: Network connectivity test
         run: |
@@ -42,62 +43,18 @@ jobs:
           echo "Checking upstream repository accessibility..."
           curl -sSL "https://github.com/$UPSTREAM_REPO" | head -n 5
 
-      - name: Sync upstream changes with retry
-        id: sync
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { exec } = require('child_process');
-            const util = require('util');
-            const execAsync = util.promisify(exec);
-            
-            const maxAttempts = 3;
-            const intervalSeconds = 60;
-            
-            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-              try {
-                console.log(`Attempt ${attempt}/${maxAttempts} to sync upstream changes...`);
-                
-                // 执行同步命令
-                const { stdout, stderr } = await execAsync(`
-                  npx fork-sync-with-upstream-action \
-                    --upstream-repo "${process.env.UPSTREAM_REPO}" \
-                    --upstream-branch "${process.env.UPSTREAM_BRANCH}" \
-                    --target-branch "${process.env.TARGET_BRANCH}" \
-                    --token "${process.env.PAT_TOKEN}" \
-                    --git-pull-args "--rebase" \
-                    --git-push-args "--force-with-lease" \
-                    --verbose
-                `);
-                
-                console.log('Sync successful!');
-                console.log('Output:', stdout);
-                return { status: 'success', stdout: stdout };
-              } catch (error) {
-                console.error(`Attempt ${attempt} failed:`, error.stderr || error.message);
-                
-                if (attempt < maxAttempts) {
-                  console.log(`Waiting ${intervalSeconds} seconds before next attempt...`);
-                  await new Promise(resolve => setTimeout(resolve, intervalSeconds * 1000));
-                } else {
-                  console.error('All attempts failed');
-                  throw new Error(`Sync failed after ${maxAttempts} attempts: ${error.message}`);
-                }
-              }
-            }
-          env:
-            PAT_TOKEN: ${{ secrets.PATTOKEN }}
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/$UPSTREAM_REPO.git
+          git fetch upstream
 
-      - name: Display sync result
+      - name: Merge upstream changes
         run: |
-          echo "Sync status: ${{ fromJSON(steps.sync.outputs.result).status }}"
-          echo "Sync output: ${{ fromJSON(steps.sync.outputs.result).stdout }}"
-          
-      - name: Handle sync failure
-        if: failure()
-        run: |
-          echo "[ERROR] Sync failed after 3 attempts"
-          exit 1
+          git checkout $TARGET_BRANCH
+          git merge upstream/$UPSTREAM_BRANCH --no-edit || git merge upstream/$UPSTREAM_BRANCH --no-edit --strategy=ours
+          git push origin $TARGET_BRANCH
+        env:
+          GITHUB_TOKEN: ${{ secrets.PATTOKEN }}
 
       - name: Delete old workflow runs
         if: success()  # 只有同步成功才清理
@@ -107,7 +64,6 @@ jobs:
           repository: ${{ github.repository }}
           retain_days: 1  # 保留1天的运行记录
           keep_minimum_runs: 2  # 至少保留2条记录
-
 
 
 
