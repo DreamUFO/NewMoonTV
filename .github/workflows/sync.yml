@@ -1,23 +1,30 @@
 name: Upstream Sync
 
+# 定时任务：每小时执行一次
 on:
   schedule:
     - cron: '0 * * * *'
+  # 允许手动触发
   workflow_dispatch:
 
 permissions:
+  # 需要写入权限才能推送同步后的代码
   contents: write
+  # 需要操作权限才能删除旧的 workflow runs
   actions: write
 
 jobs:
   sync_latest_from_upstream:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
+    # 仅在 fork 仓库上执行此操作
     if: ${{ github.event.repository.fork }}
     env:
       TZ: Asia/Shanghai
+      # 上游仓库信息
       UPSTREAM_REPO: senshinya/MoonTV
       UPSTREAM_BRANCH: main
+      # 本地目标分支
       TARGET_BRANCH: main
 
     steps:
@@ -30,48 +37,42 @@ jobs:
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
+          # fetch-depth: 0 拉取所有历史记录，以便进行安全的合并
           fetch-depth: 0
           ref: ${{ env.TARGET_BRANCH }}
-          token: ${{ secrets.PATTOKEN }}  # 用PAT确保权限
+          # 关键：使用 PATTOKEN 才能推送到 fork 仓库（GH_TOKEN 在 fork 中没有推送权限）
+          token: ${{ secrets.PATTOKEN }} 
 
-      - name: Network test
+      - name: Add upstream remote and fetch
         run: |
-          ping github.com -c 2
-          curl -sSL "https://github.com/$UPSTREAM_REPO" | head -n 3
-
-      - name: Add upstream remote
-        run: |
-          git remote add upstream https://github.com/$UPSTREAM_REPO.git || true  # 避免重复添加报错
-          git fetch upstream  # 获取上游最新代码
+          # 添加 upstream remote (如果已存在，|| true 忽略错误)
+          git remote add upstream https://github.com/$UPSTREAM_REPO.git || true
+          # 从上游仓库拉取最新提交
+          git fetch upstream
 
       - name: Configure git user
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Merge upstream changes with retry
+      - name: Merge upstream changes and push
         run: |
-          git checkout $TARGET_BRANCH
-          git pull origin $TARGET_BRANCH --rebase  # 同步本地与远程目标分支
+          echo "Starting merge from upstream/$UPSTREAM_BRANCH into $TARGET_BRANCH..."
           
-          max_attempts=3
-          attempt=1
-          while [ $attempt -le $max_attempts ]; do
-            echo "Attempt $attempt/$max_attempts to merge upstream..."
-            if git merge upstream/$UPSTREAM_BRANCH --no-edit; then
-              git push origin $TARGET_BRANCH
-              echo "Sync successful"
-              exit 0
-            else
-              echo "Merge failed. Checking conflicts..."
-              git status
-              git merge --abort  # 中止当前合并，避免影响下次尝试
-              attempt=$((attempt + 1))
-              [ $attempt -le $max_attempts ] && sleep 30
-            fi
-          done
-          echo "Sync failed after $max_attempts attempts"
-          exit 1
+          # 尝试合并上游分支到目标分支，--no-edit 避免合并信息编辑
+          # 如果发生冲突，此命令将失败并退出，这是期望行为。
+          if git merge upstream/$UPSTREAM_BRANCH --no-edit; then
+            echo "Merge succeeded. Pushing changes..."
+            # 将合并后的结果推送到您的 fork 仓库
+            git push origin $TARGET_BRANCH
+            echo "Upstream sync completed successfully."
+          else
+            # 如果发生冲突，git merge 会停下来。我们必须中止 merge 才能继续清理。
+            # 标记为错误，Workflow 将失败，以便您能手动处理冲突。
+            echo "::error::Merge failed due to conflicts. Aborting merge. Please resolve conflicts manually in your fork."
+            git merge --abort
+            exit 1 # 失败并终止 Workflow
+          fi
 
       - name: Delete old workflow runs
         if: success()
@@ -81,8 +82,3 @@ jobs:
           repository: ${{ github.repository }}
           retain_days: 1
           keep_minimum_runs: 2
-
-
-
-
-
