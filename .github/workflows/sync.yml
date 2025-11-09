@@ -2,50 +2,44 @@ name: Upstream Sync
 
 on:
   schedule:
-    - cron: "0 */6 * * *"  # 每6小时运行一次
-  workflow_dispatch:      # 允许手动触发
+    - cron: "0 */6 * * *" # run every 6 hours
+  workflow_dispatch:
 
 permissions:
-  contents: write  # 仅保留必要的写入权限
+  contents: write
+  actions: write
 
 jobs:
   sync_latest_from_upstream:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
-    if: ${{ github.event.repository.fork }}  # 仅在Fork仓库运行
+    if: ${{ github.event.repository.fork }}
 
     steps:
+      # Step 1: run a standard checkout action
       - name: Checkout target repo
         uses: actions/checkout@v4
+
+      # Step 2: run the sync action
+      - name: Sync upstream changes
+        id: sync
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
-          fetch-depth: 0  # 拉取完整历史，避免浅克隆导致的问题
+          upstream_sync_repo: senshinya/MoonTV
+          upstream_sync_branch: main
+          target_sync_branch: main
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure Git
+      - name: Sync check
+        if: failure()
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
+          echo "[Error] Due to a change in the workflow file of the upstream repository, GitHub has automatically suspended the scheduled automatic update. You need to manually sync your fork."
+          exit 1
 
-      - name: Add upstream repository
-        run: |
-          git remote add upstream https://github.com/senshinya/MoonTV.git
-          git fetch upstream
-
-      - name: Merge upstream changes with unrelated histories allowed
-        run: |
-          # 尝试正常合并，如果失败则允许不相关历史合并
-          if ! git merge upstream/main; then
-            echo "Normal merge failed, attempting to merge with unrelated histories"
-            git merge upstream/main --allow-unrelated-histories
-          fi
-
-      - name: Push changes to fork
-        run: |
-          git push origin main
-
-      - name: Clean up old workflow runs
-        uses: Mattraks/delete-workflow-runs@v2
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          retain_days: 7
-          keep_minimum_runs: 5
+          retain_days: 0
+          keep_minimum_runs: 2
