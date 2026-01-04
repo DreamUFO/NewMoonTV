@@ -11,3 +11,9 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DB"                  # IMPORTANT: must match what the code expects (usually DB)
 database_name = "moontv"         # your D1 database name in Cloudflare
 database_id = "2e8382e9-bb25-40be-8265-5cc0923267c2"  # from Cloudflare dashboard
+
+[vars]
+NEXT_PUBLIC_STORAGE_TYPE = "d1"
+NEXT_PUBLIC_ENABLE_REGISTER = "true"
+USERNAME = "admin"
+PASSWORD = "admin"
