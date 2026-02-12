@@ -42,19 +42,47 @@ jobs:
       - name: Build Next.js
         run: pnpm run pages:build    # 执行构建，生成静态文件到 out/ 或 dist/
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./dist         # 根据 next.config.js 中的 distDir 调整
+      # 压缩构建产物（保留目录结构）
+      - name: Archive build artifacts
+        run: |
+          cd dist
+          zip -r ../nextjs-build.zip .
+          cd ..
+          tar -czf nextjs-build.tar.gz -C dist .
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main'  # 只在 main 分支推送时部署
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      # 生成版本号（基于日期和 commit hash）
+      - name: Generate version
+        id: version
+        run: |
+          VERSION="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+      # 创建/更新 Release 并上传构建产物
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "Build ${{ steps.version.outputs.version }}"
+          body: |
+            ## Next.js 构建产物
+            
+            - 构建时间: ${{ github.event.head_commit.timestamp }}
+            - 提交信息: ${{ github.event.head_commit.message }}
+            - 提交作者: ${{ github.event.head_commit.author.name }}
+            
+            ### 文件说明
+            - `nextjs-build.zip` - Windows 兼容的 zip 压缩包
+            - `nextjs-build.tar.gz` - Linux/Mac 兼容的 tar.gz 压缩包
+            
+            ### 使用方法
+            1. 下载对应格式的压缩包
+            2. 解压到任意目录
+            3. 使用 `npx serve` 或任意静态服务器托管 `out` 目录内容
+          files: |
+            nextjs-build.zip
+            nextjs-build.tar.gz
+          make_latest: true  # 标记为最新 Release
+          # 如果 tag 已存在则更新
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
