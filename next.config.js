@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 const nextConfig = {
   distDir: 'dist',
-  output: 'standalone',
+  output: 'export',
   eslint: {
     dirs: ['src'],
   },
