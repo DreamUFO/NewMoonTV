@@ -28,7 +28,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9  # 指定 pnpm 版本，或去掉这一行使用最新版  
+          version: 10  # 指定 pnpm 版本，或去掉这一行使用最新版  
           
       - name: Setup Node.js
         uses: actions/setup-node@v4
