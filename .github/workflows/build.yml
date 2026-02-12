@@ -23,7 +23,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        
+      # 安装 pnpm
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9  # 指定 pnpm 版本，或去掉这一行使用最新版  
+          
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
